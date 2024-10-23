@@ -11,7 +11,7 @@ from scipy.io import loadmat
 
 
 class PseCoDataset(Dataset):
-    def __init__(self, image_dir: str, gt_dir: str, augment: bool = True):
+    def __init__(self, image_dir: str, gt_dir: str, augment: bool = True, max_points: int = 500):
         """
         Params
         ------
@@ -25,10 +25,9 @@ class PseCoDataset(Dataset):
             of the value of `augment`.
         """
 
-        self.image_dir = [
-            os.path.join(image_dir, img) for img in sorted(os.listdir(image_dir))
-        ]
+        self.image_dir = [os.path.join(image_dir, img) for img in sorted(os.listdir(image_dir))]
         self.gt_dir = [os.path.join(gt_dir, gt) for gt in sorted(os.listdir(gt_dir))]
+        self.max_points = max_points
         self.augment = augment
 
     def _read_image(self, image: str) -> tuple[torch.Tensor, tuple[int, int]]:
@@ -50,6 +49,8 @@ class PseCoDataset(Dataset):
         """
 
         original_img = Image.open(image)
+        if original_img.mode != "RGB":
+            original_img = original_img.convert("RGB")
 
         augment = A.Compose(
             [
@@ -89,9 +90,7 @@ class PseCoDataset(Dataset):
         points = data["image_info"][0][0][0][0][0]
         return torch.from_numpy(points)
 
-    def _adjust_points(
-        self, points: torch.Tensor, size: tuple[int, int]
-    ) -> torch.Tensor:
+    def _adjust_points(self, points: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
         """
         Adjust the location of the points after the original
         image is padded by `albumentations`
@@ -138,10 +137,7 @@ class PseCoDataset(Dataset):
                 points[indices, 0].view(-1, 1, 1),
                 points[indices, 1].view(-1, 1, 1),
             )
-            gaussian = torch.exp(
-                -((x - mu_x) ** 2 + (y - mu_y) ** 2)
-                / (2 * sigma[indices].view(-1, 1, 1) ** 2)
-            )
+            gaussian = torch.exp(-((x - mu_x) ** 2 + (y - mu_y) ** 2) / (2 * sigma[indices].view(-1, 1, 1) ** 2))
             gaussian = torch.max(gaussian, dim=0).values
             gaussian = gaussian.reshape(1, 256, 256)
             heatmap = torch.maximum(heatmap, gaussian)
@@ -159,15 +155,16 @@ class PseCoDataset(Dataset):
         points = self._adjust_points(self._read_gt(gt), size)
         htm = self._generate_heatmap(points)
 
-        return (img, points, htm)
+        expanded_points = torch.zeros(self.max_points, 2)
+        expanded_points[: points.shape[0], :] = points
+
+        return (img, expanded_points, htm)
 
 
-# img_dir = "/Users/mac/Datasets/bird_counting/train_data/images"
-# gt_dir = "/Users/mac/Datasets/bird_counting/train_data/ground_truth"
+img_dir = "data/test_data/images"
+gt_dir = "data/test_data/ground_truth"
 
-# index = 219
-# data = PseCoDataset(img_dir, gt_dir)
-# img, gt, ht = data[index]
+data = PseCoDataset(img_dir, gt_dir)
 
 # plt.figure(figsize=(8, 4))
 
