@@ -4,10 +4,13 @@ import numpy as np
 import albumentations as A
 # import matplotlib.pyplot as plt
 
+from tqdm import tqdm
 from PIL import Image
+from scipy.io import loadmat
 from torch.utils.data import Dataset
 from torchvision import transforms
-from scipy.io import loadmat
+
+from pretrained_models.segment_anything.modeling.sam import Sam
 
 
 class PseCoDataset(Dataset):
@@ -24,6 +27,7 @@ class PseCoDataset(Dataset):
             By default, the image size will be padded to (1024, 1024) regardless
             of the value of `augment`.
         """
+        super().__init__()
 
         self.image_dir = [os.path.join(image_dir, img) for img in sorted(os.listdir(image_dir))]
         self.gt_dir = [os.path.join(gt_dir, gt) for gt in sorted(os.listdir(gt_dir))]
@@ -161,18 +165,32 @@ class PseCoDataset(Dataset):
         return (img, expanded_points, htm)
 
 
-img_dir = "data/test_data/images"
-gt_dir = "data/test_data/ground_truth"
+class PseCoTransformedDataset(Dataset):
+    def __init__(
+        self,
+        sam: Sam,
+        image_dir: str,
+        gt_dir: str,
+        augment: bool = True,
+        max_points: int = 500,
+    ) -> None:
+        super().__init__()
 
-data = PseCoDataset(img_dir, gt_dir)
+        self.sam = sam
+        self.dataset = PseCoDataset(image_dir, gt_dir, augment, max_points)
 
-# plt.figure(figsize=(8, 4))
+        self.features = []
+        self._transform()
 
-# plt.subplot(1, 2, 1)
-# plt.scatter(gt[:, 0], gt[:, 1], c="red", marker="o")
-# plt.imshow(img)
+    def _transform(self):
+        with torch.no_grad():
+            for image, _, _ in tqdm(self.dataset, desc="Encoding images:"):
+                image = image.unsqueeze(0).cuda()
+                self.features.append(self.sam.image_encoder(image).squeeze())
 
-# plt.subplot(1, 2, 2)
-# plt.imshow(img.resize((256, 256)))
-# plt.imshow(ht.squeeze().detach().numpy(), alpha=0.4)
-# plt.show()
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        _, points, heatmap = self.dataset[index]
+        return self.features[index], points, heatmap

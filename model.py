@@ -170,6 +170,7 @@ class PointDecoderCNN(nn.Module):
             return self.layer(x)
 
     def __init__(self, sam: Sam):
+        super().__init__()
         transformer_dim = 256
 
         self.conv = nn.Sequential(
